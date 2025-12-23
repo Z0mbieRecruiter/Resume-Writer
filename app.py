@@ -8,7 +8,7 @@ import io
 # --- 1. SYSTEM CONFIG ---
 st.set_page_config(page_title="Executive Resume Strategist", layout="wide")
 
-# --- 2. SESSION STATE (Memory Management) ---
+# --- 2. SESSION STATE MANAGEMENT ---
 if "api_key" not in st.session_state:
     st.session_state.api_key = None
 if "messages" not in st.session_state:
@@ -28,11 +28,9 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- 4. SIDEBAR: PERSISTENT CONNECTION & MODEL SELECTOR ---
+# --- 4. SIDEBAR: PERSISTENT CONNECTION ---
 with st.sidebar:
     st.header("Step 1: Setup")
-    st.markdown("[🔗 Get Gemini API Key](https://aistudio.google.com/app/apikey)")
-    
     if not st.session_state.api_key:
         user_key = st.text_input("Paste Gemini API Key", type="default", autocomplete="off")
         if st.button("Connect Consultant"):
@@ -41,15 +39,10 @@ with st.sidebar:
                 st.rerun()
     else:
         st.success("✅ Consultant Online")
-        
-        # --- DYNAMIC MODEL SELECTOR ---
-        # Based on your key results, we offer the 2.5 and 2.0 options
         model_choice = st.selectbox(
             "Select Model", 
-            ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash"],
-            help="If you get a 'Quota' error, try switching models."
+            ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash"]
         )
-
         if st.button("Disconnect / Change Key"):
             st.session_state.api_key = None
             st.session_state.messages = [] 
@@ -57,8 +50,8 @@ with st.sidebar:
 
     st.divider()
     st.header("Step 2: Context")
-    target_job = st.text_area("Target Job Description", height=150)
-    uploaded_file = st.file_uploader("Current Resume (PDF or TXT)", type=["pdf", "txt"])
+    target_job = st.text_area("Target Job Description", height=150, placeholder="Paste requirements here...")
+    uploaded_file = st.file_uploader("Current Resume (PDF/TXT)", type=["pdf", "txt"])
 
 # --- 5. BRANDING & INSTRUCTIONS ---
 st.title("💼 Executive Resume Strategist")
@@ -84,7 +77,7 @@ with col1:
                 st.markdown(prompt)
 
             try:
-                # --- DYNAMIC API URL ---
+                # --- REINFORCED STABLE URL ---
                 url = f"https://generativelanguage.googleapis.com/v1/models/{model_choice}:generateContent?key={st.session_state.api_key}"
                 
                 # PDF/TXT Extraction
@@ -96,12 +89,24 @@ with col1:
                     else:
                         resume_text = uploaded_file.getvalue().decode('utf-8')
 
-                history = "\n".join([f"{m['role'].upper()}: {m['content']}" for m in st.session_state.messages])
+                # Build the conversation history as parts
+                history_parts = []
+                for m in st.session_state.messages:
+                    history_parts.append({"text": f"{m['role'].upper()}: {m['content']}"})
+
+                # --- NEW PAYLOAD STRUCTURE (Bypassing 'Rewriting' Bug) ---
+                # We separate the Persona (System) from the Data (User)
                 payload = {
+                    "system_instruction": {
+                        "parts": [{"text": st.secrets['SYSTEM_PROMPT']}]
+                    },
                     "contents": [{
-                        "parts": [{
-                            "text": f"{st.secrets['SYSTEM_PROMPT']}\n\nJD: {target_job}\nRESUME: {resume_text}\n\nHISTORY:\n{history}\n\nUSER: {prompt}"
-                        }]
+                        "parts": [
+                            {"text": f"TARGET JOB DESCRIPTION: {target_job}"},
+                            {"text": f"USER'S EXISTING RESUME: {resume_text}"},
+                            {"text": f"LATEST USER MESSAGE: {prompt}"},
+                            {"text": "Remember: Be a consultant. Ask one question at a time. Do not just rewrite."}
+                        ]
                     }]
                 }
 
@@ -110,11 +115,10 @@ with col1:
 
                 if response.status_code != 200:
                     st.error(f"API Error: {response_data.get('error', {}).get('message', 'Unknown Error')}")
-                    if "quota" in str(response_data).lower():
-                        st.warning(f"⚠️ Quota exceeded for {model_choice}. Please select a different model from the sidebar.")
                 else:
                     ai_response = response_data['candidates'][0]['content']['parts'][0]['text']
                     
+                    # Update Draft logic (<resume> tags)
                     if "<resume>" in ai_response:
                         parts = re.split(r'<\/?resume>', ai_response)
                         st.session_state.resume_draft = parts[1].strip()

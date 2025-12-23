@@ -2,21 +2,23 @@ import streamlit as st
 import google.generativeai as genai
 import re
 
-# --- 1. APP CONFIG ---
+# --- 1. SYSTEM CONFIG ---
 st.set_page_config(page_title="Executive Resume Consultant", layout="wide")
 
-# --- 2. PROFESSIONAL INTERFACE ---
+# --- 2. PROFESSIONAL BRANDING ---
 st.title("💼 Executive Resume Strategist")
 st.markdown("""
-    ### *Strategic Career Partnership*
-    **How to start:** 1. Connect API Key. 2. Paste Job Description. 3. Upload current resume (optional).
+    ### *Transforming experience into impact.*
+    **Instructions:** 1. Connect Key. 2. Paste Job Description. 3. Say 'Hello'.
 """)
 
+# --- 3. SIDEBAR SETUP ---
 with st.sidebar:
-    st.header("1. Authorization")
+    st.header("Step 1: Setup")
     st.markdown("[🔗 Get Gemini API Key](https://aistudio.google.com/app/apikey)")
     
-    user_key = st.text_input("API Key", type="default", autocomplete="off")
+    # Using 'default' avoids browser password popups
+    user_key = st.text_input("Paste API Key", type="default", autocomplete="off")
     
     if st.button("Connect Consultant"):
         if user_key:
@@ -24,19 +26,17 @@ with st.sidebar:
             st.success("Consultant Connected!")
 
     st.divider()
-    st.header("2. Context")
-    target_job = st.text_area("Target Job Description", placeholder="Paste here...", height=150)
-    
-    # RESTORED: Resume Input
-    uploaded_file = st.file_uploader("Upload Current Resume (Optional)", type=["pdf", "txt"])
+    st.header("Step 2: Context")
+    target_job = st.text_area("Target Job Description", placeholder="Paste requirements here...", height=200)
+    uploaded_file = st.file_uploader("Current Resume (Optional)", type=["pdf", "txt"])
 
-# --- 3. SESSION STATE ---
+# --- 4. SESSION STATE ---
 if "messages" not in st.session_state:
     st.session_state.messages = []
 if "resume_draft" not in st.session_state:
-    st.session_state.resume_draft = "Your draft will appear here..."
+    st.session_state.resume_draft = "# Resume Draft\n*Your progress will appear here...*"
 
-# --- 4. THE CONSULTATION LOGIC ---
+# --- 5. MAIN INTERFACE ---
 col1, col2 = st.columns([1, 1])
 
 with col1:
@@ -48,36 +48,43 @@ with col1:
     if prompt := st.chat_input("Talk to the Consultant..."):
         if "api_key" not in st.session_state:
             st.error("Please connect your API Key in the sidebar.")
+        elif "SYSTEM_PROMPT" not in st.secrets:
+            st.error("Missing 'SYSTEM_PROMPT' in Streamlit Secrets.")
         else:
             st.session_state.messages.append({"role": "user", "content": prompt})
             with st.chat_message("user"):
                 st.markdown(prompt)
 
             try:
+                # MANDATORY FIX: Force stable v1 and REST transport
                 genai.configure(api_key=st.session_state.api_key, transport='rest')
-                model = genai.GenerativeModel(model_name='gemini-1.5-flash')
                 
-                # FIXED: Safe Resume Decoding
-                resume_context = ""
+                # We use the specific stable model name
+                model = genai.GenerativeModel('models/gemini-1.5-flash')
+                
+                # Safe Resume Decoding
+                resume_text = ""
                 if uploaded_file:
                     try:
-                        # Attempt standard text decoding
-                        resume_context = f"USER'S CURRENT RESUME DATA: {uploaded_file.getvalue().decode('utf-8')}"
-                    except UnicodeDecodeError:
-                        # Fallback for PDFs or binary files
-                        resume_context = "USER UPLOADED A BINARY FILE (PDF/DOCX). ASSUME THEY WANT TO START FROM SCRATCH OR PROVIDE DETAILS MANUALLY."
+                        resume_text = f"User Resume: {uploaded_file.getvalue().decode('utf-8')}"
+                    except:
+                        resume_text = "User uploaded a file (PDF/Binary). Ask for specific details."
 
-                full_context = f"""
-                SYSTEM PROMPT: {st.secrets.get('SYSTEM_PROMPT', 'You are a resume expert.')}
+                # Construct full context package
+                history = "\n".join([f"{m['role']}: {m['content']}" for m in st.session_state.messages])
+                full_query = f"""
+                SYSTEM PROMPT: {st.secrets['SYSTEM_PROMPT']}
                 TARGET JOB: {target_job}
-                {resume_context}
+                {resume_text}
                 
-                HISTORY: {[m['content'] for m in st.session_state.messages[:-1]]}
+                HISTORY: {history}
                 USER INPUT: {prompt}
                 """
+
+                # Direct generation call to avoid the 'v1beta' error
+                response = model.generate_content(full_query)
                 
-                response = model.generate_content(full_context)
-                
+                # Update UI
                 res_text = response.text
                 if "<resume>" in res_text:
                     parts = re.split(r'<\/?resume>', res_text)
@@ -92,8 +99,9 @@ with col1:
                 st.rerun()
 
             except Exception as e:
+                # If it fails, show the exact raw error for a final review
                 st.error(f"Consultation Error: {str(e)}")
 
 with col2:
     st.subheader("Strategic Draft")
-    st.markdown(f'<div style="background-color:#f8f9fa;padding:20px;border-radius:15px;height:75vh;overflow-y:auto;border:1px solid #dee2e6">{st.session_state.resume_draft}</div>', unsafe_allow_html=True)
+    st.markdown(f'<div style="background-color:#f8f9fa;padding:25px;border-radius:15px;height:75vh;overflow-y:auto;border:1px solid #e9ecef">{st.session_state.resume_draft}</div>', unsafe_allow_html=True)

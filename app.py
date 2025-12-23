@@ -1,5 +1,6 @@
 import streamlit as st
-import google.generativeai as genai
+import requests
+import json
 import re
 
 # --- 1. SYSTEM CONFIGURATION ---
@@ -27,13 +28,12 @@ st.markdown("""
 st.title("💼 Executive Resume Strategist")
 st.markdown("### *Strategic Career Partnership*")
 
-# --- 4. SIDEBAR (Simplified to avoid browser password interference) ---
+# --- 4. SIDEBAR ---
 with st.sidebar:
     st.header("Step 1: Setup")
     st.markdown("[🔗 Get Gemini API Key](https://aistudio.google.com/app/apikey)")
     
-    # We use 'default' type and autocomplete="off" to stop password popups
-    user_key = st.text_input("Paste API Key", type="default", autocomplete="off")
+    user_key = st.text_input("Paste API Key", type="password")
     
     if st.button("Connect Consultant"):
         if user_key:
@@ -53,84 +53,69 @@ if "messages" not in st.session_state:
 if "resume_draft" not in st.session_state:
     st.session_state.resume_draft = "Your draft will appear here..."
 
-# --- 6. MAIN INTERFACE: CHAT & PREVIEW ---
+# --- 6. MAIN INTERFACE ---
 col1, col2 = st.columns([1, 1])
 
 with col1:
     st.subheader("Consultation")
-    # Display message history
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
 
-    # Input Logic
     if prompt := st.chat_input("Talk to the Consultant..."):
         if "api_key" not in st.session_state:
             st.error("Please connect your API Key in the sidebar.")
         else:
-            # Add user message to UI
             st.session_state.messages.append({"role": "user", "content": prompt})
             with st.chat_message("user"):
                 st.markdown(prompt)
 
             try:
-                # FORCE THE CONNECTION: This bypasses the library's 'Beta' default
-                genai.configure(api_key=st.session_state.api_key, transport='rest')
+                # --- DIRECT API CALL (Bypassing the Google Library) ---
+                api_url = f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key={st.session_state.api_key}"
                 
-                # We use the direct model name (no models/ prefix for maximal compatibility)
-                model = genai.GenerativeModel('gemini-1.5-flash')
-                
-                # Handling File Content
-                resume_content = ""
+                # Build context
+                resume_text = ""
                 if uploaded_file:
-                    try:
-                        resume_content = f"Existing Resume: {uploaded_file.getvalue().decode('utf-8')}"
-                    except:
-                        resume_content = "File uploaded, but could not be read as text."
-
-                # BUILDING THE PROMPT MANUALLY (Stability Fix)
-                # Instead of 'start_chat', we send the history as text.
-                history_text = "\n".join([f"{m['role'].upper()}: {m['content']}" for m in st.session_state.messages])
+                    resume_text = f"Existing Resume: {uploaded_file.getvalue().decode('utf-8')}"
                 
-                # Pull system prompt from secrets safely
+                history_text = "\n".join([f"{m['role'].upper()}: {m['content']}" for m in st.session_state.messages])
                 system_instr = st.secrets.get("SYSTEM_PROMPT", "You are a resume consultant.")
                 
-                final_input = f"""
-                {system_instr}
-                
-                TARGET JOB: {target_job}
-                {resume_content}
-                
-                CONVERSATION HISTORY:
-                {history_text}
-                
-                LATEST RESPONSE FROM USER: {prompt}
-                """
-                
-                # Direct generation call
-                response = model.generate_content(final_input)
-                
-                # Process AI Response
-                response_text = response.text
-                if "<resume>" in response_text:
-                    parts = re.split(r'<\/?resume>', response_text)
-                    st.session_state.resume_draft = parts[1].strip()
-                    clean_res = parts[0].strip() + "\n" + (parts[2].strip() if len(parts) > 2 else "")
-                else:
-                    clean_res = response_text
+                payload = {
+                    "contents": [{
+                        "parts": [{
+                            "text": f"{system_instr}\n\nJOB: {target_job}\n{resume_text}\n\nHISTORY:\n{history_text}\n\nUSER: {prompt}"
+                        }]
+                    }]
+                }
 
-                # Update UI with Assistant message
-                st.session_state.messages.append({"role": "assistant", "content": clean_res})
-                with st.chat_message("assistant"):
-                    st.markdown(clean_res)
-                
-                # Refresh page to show updates
-                st.rerun()
+                # Send direct web request
+                response = requests.post(api_url, headers={'Content-Type': 'application/json'}, data=json.dumps(payload))
+                response_data = response.json()
+
+                if response.status_code != 200:
+                    st.error(f"API Error {response.status_code}: {response_data.get('error', {}).get('message', 'Unknown error')}")
+                else:
+                    # Extract the text
+                    ai_response = response_data['candidates'][0]['content']['parts'][0]['text']
+                    
+                    # Process Draft Tags
+                    if "<resume>" in ai_response:
+                        parts = re.split(r'<\/?resume>', ai_response)
+                        st.session_state.resume_draft = parts[1].strip()
+                        clean_res = parts[0].strip() + "\n" + (parts[2].strip() if len(parts) > 2 else "")
+                    else:
+                        clean_res = ai_response
+
+                    st.session_state.messages.append({"role": "assistant", "content": clean_res})
+                    with st.chat_message("assistant"):
+                        st.markdown(clean_res)
+                    st.rerun()
 
             except Exception as e:
-                st.error(f"Consultation Error: {str(e)}")
+                st.error(f"System Error: {str(e)}")
 
 with col2:
     st.subheader("Strategic Draft")
-    # Styled draft box
     st.markdown(f'<div class="resume-box">{st.session_state.resume_draft}</div>', unsafe_allow_html=True)

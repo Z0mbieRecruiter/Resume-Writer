@@ -1,9 +1,13 @@
 import streamlit as st
 import google.generativeai as genai
 import re
+import os
 
 # --- 1. APP CONFIGURATION ---
 st.set_page_config(page_title="Executive Resume Consultant", layout="wide")
+
+# Force stable API endpoint usage
+os.environ["GOOGLE_API_USE_MTLS_ENDPOINT"] = "never"
 
 # --- 2. CUSTOM STYLING ---
 st.markdown("""
@@ -40,7 +44,7 @@ with st.sidebar:
     st.markdown("[🔗 Get your FREE Gemini API Key here](https://aistudio.google.com/app/apikey)")
     
     with st.form("api_form"):
-        # type="default" prevents browser password manager popups
+        # We use 'default' to stop browser password manager popups
         input_key = st.text_input("Paste Gemini API Key", type="default")
         submit_button = st.form_submit_button("Connect Consultant")
         
@@ -48,7 +52,7 @@ with st.sidebar:
             st.session_state.api_key = input_key
             st.success("Consultant Connected!")
 
-    st.caption("Engine: Gemini 1.5 Flash (Latest)")
+    st.caption("Engine: Gemini 1.5 Flash")
     st.divider()
     
     st.header("Step 2: Context")
@@ -70,74 +74,62 @@ col1, col2 = st.columns([1, 1])
 with col1:
     st.subheader("The Consultation")
     
-    # Display existing chat history
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
 
-    # Chat Input Logic
     if prompt := st.chat_input("Talk to the Consultant..."):
-        # Check for API Key
         if "api_key" not in st.session_state or not st.session_state.api_key:
             st.error("Please enter your API Key and click 'Connect Consultant' in the sidebar!")
-        # Check for System Prompt in Secrets
         elif "SYSTEM_PROMPT" not in st.secrets:
             st.error("Missing 'SYSTEM_PROMPT' in Streamlit Secrets.")
         else:
-            # Add user message to state
             st.session_state.messages.append({"role": "user", "content": prompt})
             with st.chat_message("user"):
                 st.markdown(prompt)
 
             try:
-                # Configure AI
                 genai.configure(api_key=st.session_state.api_key)
                 
-                # Setup Model with "latest" version
+                # Using the most stable model identifier
                 model = genai.GenerativeModel(
-                    model_name='gemini-1.5-flash-latest', 
+                    model_name='gemini-1.5-flash', 
                     system_instruction=st.secrets["SYSTEM_PROMPT"]
                 )
                 
-                # Rebuild history for the API
+                # Rebuild history
                 history_data = []
                 for m in st.session_state.messages[:-1]:
                     role = "user" if m["role"] == "user" else "model"
                     history_data.append({"role": role, "parts": [m["content"]]})
                 
-                # Start Session
                 chat_session = model.start_chat(history=history_data)
                 
-                # Inject Job Description context into the prompt
                 full_query = f"Target Job Description: {target_job}\n\nUser Input: {prompt}"
                 response = chat_session.send_message(full_query)
                 
-                # Process the response
                 response_text = response.text
                 
-                # Check for resume tags
                 if "<resume>" in response_text:
                     parts = re.split(r'<\/?resume>', response_text)
-                    # Update preview window (content inside tags)
                     st.session_state.resume_draft = parts[1].strip()
-                    # Clean response for chat (content outside tags)
                     clean_response = parts[0].strip() + "\n" + (parts[2].strip() if len(parts) > 2 else "")
                 else:
                     clean_response = response_text
 
-                # Save assistant response
                 st.session_state.messages.append({"role": "assistant", "content": clean_response})
                 with st.chat_message("assistant"):
                     st.markdown(clean_response)
                 
-                # Refresh to update the preview column
                 st.rerun()
 
             except Exception as e:
+                # If Flash fails, this will tell us exactly why
                 st.error(f"Consultation Error: {str(e)}")
+                if "404" in str(e):
+                    st.warning("The model 'gemini-1.5-flash' wasn't found. Trying stable backup...")
+                    # Optional: Add fallback model logic here if needed
 
-# --- 7. THE RESUME PREVIEW COLUMN ---
 with col2:
     st.subheader("Strategic Draft")
-    # This renders the draft inside the styled white/gray box
     st.markdown(f'<div class="resume-box">{st.session_state.resume_draft}</div>', unsafe_allow_html=True)

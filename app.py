@@ -2,24 +2,24 @@ import streamlit as st
 import google.generativeai as genai
 import re
 
-# --- 1. SYSTEM CHECK ---
-# We force the library to avoid 'Beta' routes which are causing the 404
+# --- 1. STABLE CONFIGURATION ---
 st.set_page_config(page_title="Executive Resume Strategist", layout="wide")
 
-# --- 2. SIDEBAR & BRANDING ---
+# --- 2. PROFESSIONAL INTERFACE ---
 st.title("💼 Executive Resume Strategist")
 st.markdown("""
     ### *Strategic Career Partnership*
-    **How to start:** 1. Enter your API Key and click **Connect**.
+    **Instructions:**
+    1. Enter your **API Key** below and click **Connect**.
     2. Paste your **Target Job Description**.
-    3. Type **"Hello"** to begin the interview.
+    3. Type **"Hello"** to start the consultation.
 """)
 
 with st.sidebar:
     st.header("1. Authorization")
     st.markdown("[🔗 Get Gemini API Key](https://aistudio.google.com/app/apikey)")
     
-    # type="default" prevents the browser password manager from interfering
+    # type="default" stops the browser from treating this as a 'password'
     user_key = st.text_input("API Key", type="default", autocomplete="off")
     
     if st.button("Connect Consultant"):
@@ -31,7 +31,7 @@ with st.sidebar:
 
     st.divider()
     st.header("2. Context")
-    target_job = st.text_area("Target Job Description", placeholder="Paste the job you want here...", height=200)
+    target_job = st.text_area("Target Job Description", placeholder="Paste the job requirements here...", height=200)
 
 # --- 3. SESSION STATE ---
 if "messages" not in st.session_state:
@@ -39,7 +39,7 @@ if "messages" not in st.session_state:
 if "resume_draft" not in st.session_state:
     st.session_state.resume_draft = "Your draft will appear here..."
 
-# --- 4. THE CONSULTATION LOGIC ---
+# --- 4. THE CONSULTATION ---
 col1, col2 = st.columns([1, 1])
 
 with col1:
@@ -52,45 +52,43 @@ with col1:
         if "api_key" not in st.session_state:
             st.error("Please connect your API Key in the sidebar.")
         elif "SYSTEM_PROMPT" not in st.secrets:
-            st.error("Error: SYSTEM_PROMPT is missing from Streamlit Secrets.")
+            st.error("Missing 'SYSTEM_PROMPT' in Streamlit Secrets.")
         else:
             st.session_state.messages.append({"role": "user", "content": prompt})
             with st.chat_message("user"):
                 st.markdown(prompt)
 
             try:
-                # MANDATORY SYSTEM SETTING: Force the use of the 'v1' stable API
-                # This is likely the 'missing function' - bypassing the library's default Beta route
+                # FORCE STABLE TRANSPORT: This is the critical line to bypass 404s
                 genai.configure(api_key=st.session_state.api_key, transport='rest')
                 
-                # We define the model with a very specific 'models/' prefix
-                model = genai.GenerativeModel(model_name='models/gemini-1.5-flash')
+                # We call the model using the direct 'v1' stable path
+                model = genai.GenerativeModel(model_name='gemini-1.5-flash')
                 
-                # We package everything together so the AI has full context every time
-                full_history = "\n".join([f"{m['role']}: {m['content']}" for m in st.session_state.messages])
+                # Bundle everything into a single instruction set for stability
+                history_text = "\n".join([f"{m['role']}: {m['content']}" for m in st.session_state.messages])
                 
-                final_instruction = f"""
-                {st.secrets['SYSTEM_PROMPT']}
+                final_prompt = f"""
+                SYSTEM INSTRUCTIONS: {st.secrets['SYSTEM_PROMPT']}
                 
-                TARGET JOB: {target_job}
+                JOB DESCRIPTION: {target_job}
                 
-                CONVERSATION SO FAR:
-                {full_history}
+                CONVERSATION HISTORY:
+                {history_text}
                 
-                USER'S LATEST RESPONSE: {prompt}
+                USER INPUT: {prompt}
                 """
                 
-                # Direct generation call
-                response = model.generate_content(final_instruction)
+                # Direct generation avoids the buggy 'start_chat' beta logic
+                response = model.generate_content(final_prompt)
                 
-                # Process response and update preview
                 res_text = response.text
                 if "<resume>" in res_text:
                     parts = re.split(r'<\/?resume>', res_text)
                     st.session_state.resume_draft = parts[1].strip()
                     clean_res = parts[0].strip() + "\n" + (parts[2].strip() if len(parts) > 2 else "")
                 else:
-                    clean_res = response_text
+                    clean_res = res_text
 
                 st.session_state.messages.append({"role": "assistant", "content": clean_res})
                 with st.chat_message("assistant"):
@@ -98,7 +96,6 @@ with col1:
                 st.rerun()
 
             except Exception as e:
-                # We print the raw error here to catch if it's still trying to use 'v1beta'
                 st.error(f"Consultation Error: {str(e)}")
 
 with col2:

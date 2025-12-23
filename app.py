@@ -29,17 +29,18 @@ st.markdown("""
     ### *Transforming experience into impact.*
     This tool is a **Strategic Consultant** that interviews you to align your history with your target role.
     
-    **How to Start:** 1. Enter your **Gemini API Key** in the sidebar and click **Connect**. 
-    2. Provide your **Job Description** (and resume if you have one). 
+    **How to Start:**
+    1. Enter your **Gemini API Key** in the sidebar and click **Connect**. 
+    2. Provide your **Job Description** (and upload your resume if you have one). 
     3. Type **"Hello"** in the chat to begin your consultation.
 """)
 
-# --- 4. SIDEBAR (Fixed Password & API Logic) ---
+# --- 4. SIDEBAR (Bypassing Browser Password Suggesters) ---
 with st.sidebar:
     st.header("Step 1: Setup")
     st.markdown("[🔗 Get your FREE Gemini API Key here](https://aistudio.google.com/app/apikey)")
     
-    # Using 'label_visibility' and 'autocomplete' to stop browser password popups
+    # Using autocomplete="off" to stop browser password popups
     input_key = st.text_input(
         "Paste Gemini API Key", 
         type="default", 
@@ -87,14 +88,16 @@ with col1:
             try:
                 genai.configure(api_key=st.session_state.api_key)
                 
-                # --- SMART MODEL SELECTION ---
-                # We try the best models in order of capability
+                # --- AUTO-MODEL DETECTION ---
+                # This scans your key to find out which models you are allowed to use
                 available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
                 
-                # Preferred order: Flash 1.5 -> Pro 1.5 -> Pro 1.0
-                model_to_use = "gemini-1.5-flash" # Default
+                # Check for Flash 1.5, then Pro 1.5, then the universal fallback Pro 1.0
+                model_to_use = "gemini-1.5-flash" 
                 if "models/gemini-1.5-flash" not in available_models:
-                    if "models/gemini-pro" in available_models:
+                    if "models/gemini-1.5-pro" in available_models:
+                        model_to_use = "gemini-1.5-pro"
+                    else:
                         model_to_use = "gemini-pro"
                 
                 model = genai.GenerativeModel(
@@ -113,7 +116,7 @@ with col1:
                 full_query = f"Target Job Description: {target_job}\n\nUser Input: {prompt}"
                 response = chat_session.send_message(full_query)
                 
-                # Parsing logic
+                # Update Draft Logic
                 res_text = response.text
                 if "<resume>" in res_text:
                     parts = re.split(r'<\/?resume>', res_text)
@@ -130,7 +133,7 @@ with col1:
             except Exception as e:
                 st.error(f"Consultation Error: {str(e)}")
                 if "API_KEY_INVALID" in str(e):
-                    st.info("💡 Your API key wasn't recognized. Make sure you copied the full string correctly from AI Studio.")
+                    st.info("💡 Tip: Your API key was not recognized. Ensure you copied the full string from AI Studio.")
 
 with col2:
     st.subheader("Strategic Draft")

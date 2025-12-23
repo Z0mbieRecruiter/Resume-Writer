@@ -88,9 +88,10 @@ with col1:
             try:
                 # Configure the AI
                 genai.configure(api_key=st.session_state.api_key)
-                model = genai.GenerativeModel(
-                    model_name='gemini-1.5-flash', 
-                    system_instruction=st.secrets["SYSTEM_PROMPT"]
+model = genai.GenerativeModel(
+    model_name='gemini-1.5-flash-latest', 
+    system_instruction=st.secrets["SYSTEM_PROMPT"]
+)
                 )
                 
                 # Format history for Gemini API

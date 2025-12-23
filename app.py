@@ -2,30 +2,70 @@ import streamlit as st
 import google.generativeai as genai
 import re
 
-# --- 1. SETTINGS & BRANDING ---
-st.set_page_config(page_title="Resume Consultant", layout="wide")
+# --- 1. APP CONFIGURATION ---
+st.set_page_config(page_title="Executive Resume Consultant", layout="wide")
+
+# --- 2. PROFESSIONAL STYLING ---
+st.markdown("""
+    <style>
+    .stChatMessage { border-radius: 10px; margin-bottom: 10px; }
+    .resume-box { 
+        background-color: #f8f9fa; 
+        padding: 25px; 
+        border-radius: 15px; 
+        border: 1px solid #e9ecef; 
+        height: 80vh; 
+        overflow-y: auto; 
+        color: #212529;
+        font-family: 'serif';
+        white-space: pre-wrap;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+# --- 3. RESTORED INSTRUCTIONS & BRANDING ---
 st.title("💼 Executive Resume Strategist")
+st.markdown("""
+    ### *Transforming experience into impact.*
+    This tool is a **Strategic Consultant** that interviews you to align your history with your target role.
+    
+    **How to Start:** 1. Enter your **Gemini API Key** in the sidebar and click **Connect**. 
+    2. Provide your **Job Description** (and resume if you have one). 
+    3. Type **"Hello"** in the chat to begin your consultation.
+""")
 
-# --- 2. SIDEBAR (Simplified for Non-Devs) ---
+# --- 4. SIDEBAR (Fixed Password & API Logic) ---
 with st.sidebar:
-    st.header("1. Setup")
-    st.markdown("[Get a Free API Key here](https://aistudio.google.com/app/apikey)")
+    st.header("Step 1: Setup")
+    st.markdown("[🔗 Get your FREE Gemini API Key here](https://aistudio.google.com/app/apikey)")
     
-    # We use a simple text input. No 'Connect' button needed - it will check live.
-    user_key = st.text_input("Paste your API Key here:", type="password")
+    # Using 'label_visibility' and 'autocomplete' to stop browser password popups
+    input_key = st.text_input(
+        "Paste Gemini API Key", 
+        type="default", 
+        autocomplete="off",
+        placeholder="Enter key here..."
+    )
     
-    st.divider()
-    st.header("2. Context")
-    target_job = st.text_area("Target Job Description", height=200)
-    uploaded_file = st.file_uploader("Upload Resume (Optional)", type=["pdf", "txt"])
+    if st.button("Connect Consultant"):
+        if input_key:
+            st.session_state.api_key = input_key
+            st.success("Consultant Connected!")
+        else:
+            st.error("Please paste a key first.")
 
-# --- 3. SESSION STATE ---
+    st.divider()
+    st.header("Step 2: Context")
+    target_job = st.text_area("Target Job Description", placeholder="Paste requirements here...", height=200)
+    uploaded_file = st.file_uploader("Current Resume (Optional)", type=["pdf", "txt"])
+
+# --- 5. INITIALIZE STATE ---
 if "messages" not in st.session_state:
     st.session_state.messages = []
 if "resume_draft" not in st.session_state:
-    st.session_state.resume_draft = "Your draft will appear here..."
+    st.session_state.resume_draft = "# Resume Draft\n*Your progress will appear here...*"
 
-# --- 4. THE CONSULTATION ---
+# --- 6. MAIN INTERFACE ---
 col1, col2 = st.columns([1, 1])
 
 with col1:
@@ -34,37 +74,53 @@ with col1:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
 
-    if prompt := st.chat_input("Say 'Hello' to start..."):
-        if not user_key:
-            st.error("Please paste your API Key in the sidebar.")
+    if prompt := st.chat_input("Talk to the Consultant..."):
+        if "api_key" not in st.session_state:
+            st.error("Please connect your API Key in the sidebar first.")
+        elif "SYSTEM_PROMPT" not in st.secrets:
+            st.error("Missing 'SYSTEM_PROMPT' in Streamlit Secrets.")
         else:
             st.session_state.messages.append({"role": "user", "content": prompt})
             with st.chat_message("user"):
                 st.markdown(prompt)
 
             try:
-                # Initialize the API
-                genai.configure(api_key=user_key)
+                genai.configure(api_key=st.session_state.api_key)
                 
-                # STABILITY FIX: Use the most basic, universal model name
-                # This avoids the 404 errors by using the global standard
-                model = genai.GenerativeModel('gemini-1.5-flash')
+                # --- SMART MODEL SELECTION ---
+                # We try the best models in order of capability
+                available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
                 
-                # Start chat with System Instructions pulled from Secrets
-                chat = model.start_chat(history=[])
+                # Preferred order: Flash 1.5 -> Pro 1.5 -> Pro 1.0
+                model_to_use = "gemini-1.5-flash" # Default
+                if "models/gemini-1.5-flash" not in available_models:
+                    if "models/gemini-pro" in available_models:
+                        model_to_use = "gemini-pro"
                 
-                # Send the secret prompt first, then the user's message
-                full_context = f"{st.secrets['SYSTEM_PROMPT']}\n\nJob: {target_job}\n\nUser: {prompt}"
-                response = chat.send_message(full_context)
+                model = genai.GenerativeModel(
+                    model_name=model_to_use,
+                    system_instruction=st.secrets["SYSTEM_PROMPT"]
+                )
                 
-                # Update UI
-                response_text = response.text
-                if "<resume>" in response_text:
-                    parts = re.split(r'<\/?resume>', response_text)
+                # Rebuild history
+                history_data = []
+                for m in st.session_state.messages[:-1]:
+                    role = "user" if m["role"] == "user" else "model"
+                    history_data.append({"role": role, "parts": [m["content"]]})
+                
+                chat_session = model.start_chat(history=history_data)
+                
+                full_query = f"Target Job Description: {target_job}\n\nUser Input: {prompt}"
+                response = chat_session.send_message(full_query)
+                
+                # Parsing logic
+                res_text = response.text
+                if "<resume>" in res_text:
+                    parts = re.split(r'<\/?resume>', res_text)
                     st.session_state.resume_draft = parts[1].strip()
-                    clean_res = parts[0] + (parts[2] if len(parts) > 2 else "")
+                    clean_res = parts[0].strip() + "\n" + (parts[2].strip() if len(parts) > 2 else "")
                 else:
-                    clean_res = response_text
+                    clean_res = res_text
 
                 st.session_state.messages.append({"role": "assistant", "content": clean_res})
                 with st.chat_message("assistant"):
@@ -72,9 +128,10 @@ with col1:
                 st.rerun()
 
             except Exception as e:
-                st.error(f"Connection Error: {str(e)}")
-                st.info("Check if 'Generative Language API' is enabled in your Google AI Studio.")
+                st.error(f"Consultation Error: {str(e)}")
+                if "API_KEY_INVALID" in str(e):
+                    st.info("💡 Your API key wasn't recognized. Make sure you copied the full string correctly from AI Studio.")
 
 with col2:
     st.subheader("Strategic Draft")
-    st.markdown(f'<div style="background-color:#f0f2f6;padding:20px;border-radius:10px;height:70vh;overflow-y:auto">{st.session_state.resume_draft}</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="resume-box">{st.session_state.resume_draft}</div>', unsafe_allow_html=True)

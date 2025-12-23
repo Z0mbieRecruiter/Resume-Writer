@@ -5,9 +5,22 @@ import re
 import io
 
 # --- 1. SYSTEM CONFIG ---
-st.set_page_config(page_title="Executive Resume Consultant", layout="wide")
+st.set_page_config(page_title="Executive Resume Strategist", layout="wide")
 
-# --- 2. PROFESSIONAL STYLING ---
+# --- 2. SESSION STATE INITIALIZATION (Crucial for Memory) ---
+if "api_key" not in st.session_state:
+    st.session_state.api_key = None
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+if "resume_draft" not in st.session_state:
+    st.session_state.resume_draft = "# Resume Draft\n*Your progress will appear here...*"
+
+# --- 3. PERSISTENT API CONFIGURATION ---
+# This runs on EVERY refresh. If a key is in memory, we re-verify the stable route.
+if st.session_state.api_key:
+    genai.configure(api_key=st.session_state.api_key, transport='rest')
+
+# --- 4. PROFESSIONAL STYLING ---
 st.markdown("""
     <style>
     .stChatMessage { border-radius: 10px; margin-bottom: 10px; }
@@ -19,46 +32,37 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- 3. BRANDING & INSTRUCTIONS ---
-st.title("💼 Executive Resume Strategist")
-st.markdown("""
-    ### *Strategic Career Partnership*
-    **How to Start:** 1. Enter your **API Key** and click **Connect**.
-    2. Paste the **Job Description** and upload your **Resume (PDF/TXT)**.
-    3. Type **"Hello"** to begin the interview.
-""")
-
-# --- 4. SIDEBAR SETUP ---
+# --- 5. SIDEBAR: PERSISTENT CONNECTION ---
 with st.sidebar:
     st.header("Step 1: Setup")
     st.markdown("[🔗 Get Gemini API Key](https://aistudio.google.com/app/apikey)")
     
-    # Standard input to avoid password manager popups
-    user_key = st.text_input("Paste Gemini API Key", type="default", autocomplete="off")
-    
-    if st.button("Connect Consultant"):
-        if user_key:
-            st.session_state.api_key = user_key
-            try:
-                genai.configure(api_key=user_key)
-                # Test connection and get version
-                v = genai.__version__
-                st.success(f"Connected! SDK Version: {v}")
-            except Exception as e:
-                st.error(f"Connection Failed: {str(e)}")
+    # If not connected, show the input. If connected, show status.
+    if not st.session_state.api_key:
+        user_key = st.text_input("Paste Gemini API Key", type="default", autocomplete="off")
+        if st.button("Connect Consultant"):
+            if user_key:
+                st.session_state.api_key = user_key
+                st.rerun() # Force refresh to lock in the key
+    else:
+        st.success("✅ Consultant Online")
+        if st.button("Disconnect / Change Key"):
+            st.session_state.api_key = None
+            st.rerun()
 
     st.divider()
     st.header("Step 2: Context")
     target_job = st.text_area("Target Job Description", height=150)
     uploaded_file = st.file_uploader("Current Resume (PDF or TXT)", type=["pdf", "txt"])
 
-# --- 5. INITIALIZE STATE ---
-if "messages" not in st.session_state:
-    st.session_state.messages = []
-if "resume_draft" not in st.session_state:
-    st.session_state.resume_draft = "# Resume Draft\n*Your progress will appear here...*"
+# --- 6. BRANDING & INSTRUCTIONS ---
+st.title("💼 Executive Resume Strategist")
+st.markdown("""
+    ### *Strategic Career Partnership*
+    **How to Start:** 1. Connect Key. 2. Paste Job Description. 3. Say 'Hello'.
+""")
 
-# --- 6. MAIN INTERFACE ---
+# --- 7. MAIN INTERFACE ---
 col1, col2 = st.columns([1, 1])
 
 with col1:
@@ -68,30 +72,28 @@ with col1:
             st.markdown(msg["content"])
 
     if prompt := st.chat_input("Talk to the Consultant..."):
-        if "api_key" not in st.session_state:
-            st.error("Please connect your API Key first.")
+        if not st.session_state.api_key:
+            st.error("Please connect your API Key in the sidebar.")
         elif "SYSTEM_PROMPT" not in st.secrets:
-            st.error("Missing 'SYSTEM_PROMPT' in Streamlit Secrets.")
+            st.error("Missing 'SYSTEM_PROMPT' in Secrets. Check your Streamlit settings.")
         else:
             st.session_state.messages.append({"role": "user", "content": prompt})
             with st.chat_message("user"):
                 st.markdown(prompt)
 
             try:
-                genai.configure(api_key=st.session_state.api_key)
+                # Direct call to the stable model
+                model = genai.GenerativeModel(model_name='models/gemini-1.5-flash')
                 
-                # --- PDF/TXT Processing ---
+                # PDF/TXT Extraction
                 resume_text = ""
                 if uploaded_file:
                     if uploaded_file.type == "application/pdf":
                         pdf_reader = PyPDF2.PdfReader(io.BytesIO(uploaded_file.read()))
-                        resume_text = " ".join([page.extract_text() for page in pdf_reader.pages])
+                        resume_text = " ".join([p.extract_text() for p in pdf_reader.pages])
                     else:
                         resume_text = uploaded_file.getvalue().decode('utf-8')
 
-                # Using a fresh model call to avoid v1beta issues
-                model = genai.GenerativeModel('gemini-1.5-flash')
-                
                 history = "\n".join([f"{m['role'].upper()}: {m['content']}" for m in st.session_state.messages])
                 full_payload = f"{st.secrets['SYSTEM_PROMPT']}\n\nTARGET JD: {target_job}\nUPLOADED RESUME: {resume_text}\n\nHISTORY:\n{history}\n\nUSER: {prompt}"
 

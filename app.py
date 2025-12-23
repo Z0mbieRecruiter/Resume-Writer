@@ -16,10 +16,9 @@ with st.sidebar:
     st.header("1. Authorization")
     st.markdown("[🔗 Get Gemini API Key](https://aistudio.google.com/app/apikey)")
     
-    # Standard text input to prevent browser password popups
     user_key = st.text_input("API Key", type="default", autocomplete="off")
     
-    if st.form_submit_button("Connect") if 'form' in globals() else st.button("Connect Consultant"):
+    if st.button("Connect Consultant"):
         if user_key:
             st.session_state.api_key = user_key
             st.success("Consultant Connected!")
@@ -55,18 +54,19 @@ with col1:
                 st.markdown(prompt)
 
             try:
-                # SYSTEMATIC FIX: Use 'rest' transport and 'v1' stable version
                 genai.configure(api_key=st.session_state.api_key, transport='rest')
-                
-                # We use the generic 'gemini-1.5-flash' but force the stable route
                 model = genai.GenerativeModel(model_name='gemini-1.5-flash')
                 
-                # Gather resume content if provided
+                # FIXED: Safe Resume Decoding
                 resume_context = ""
                 if uploaded_file:
-                    resume_context = f"USER'S CURRENT RESUME DATA: {uploaded_file.getvalue().decode('utf-8')}"
+                    try:
+                        # Attempt standard text decoding
+                        resume_context = f"USER'S CURRENT RESUME DATA: {uploaded_file.getvalue().decode('utf-8')}"
+                    except UnicodeDecodeError:
+                        # Fallback for PDFs or binary files
+                        resume_context = "USER UPLOADED A BINARY FILE (PDF/DOCX). ASSUME THEY WANT TO START FROM SCRATCH OR PROVIDE DETAILS MANUALLY."
 
-                # Package everything for a direct generation call
                 full_context = f"""
                 SYSTEM PROMPT: {st.secrets.get('SYSTEM_PROMPT', 'You are a resume expert.')}
                 TARGET JOB: {target_job}
@@ -76,7 +76,6 @@ with col1:
                 USER INPUT: {prompt}
                 """
                 
-                # Direct call to bypass buggy chat history/beta features
                 response = model.generate_content(full_context)
                 
                 res_text = response.text
@@ -93,7 +92,6 @@ with col1:
                 st.rerun()
 
             except Exception as e:
-                # Log the specific error to help with final troubleshooting
                 st.error(f"Consultation Error: {str(e)}")
 
 with col2:

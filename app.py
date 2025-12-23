@@ -28,7 +28,7 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- 4. SIDEBAR: PERSISTENT CONNECTION & HEALTH CHECK ---
+# --- 4. SIDEBAR: PERSISTENT CONNECTION ---
 with st.sidebar:
     st.header("Step 1: Setup")
     st.markdown("[🔗 Get Gemini API Key](https://aistudio.google.com/app/apikey)")
@@ -42,7 +42,7 @@ with st.sidebar:
     else:
         st.success("✅ Consultant Online")
         
-        # --- NEW: HEALTH CHECK TOOL ---
+        # --- PERMANENT HEALTH CHECK ---
         if st.button("🔍 Check Available Models"):
             try:
                 list_url = f"https://generativelanguage.googleapis.com/v1/models?key={st.session_state.api_key}"
@@ -50,9 +50,9 @@ with st.sidebar:
                 models_data = r.json()
                 if "models" in models_data:
                     model_names = [m['name'] for m in models_data['models'] if 'generateContent' in m['supportedGenerationMethods']]
-                    st.info("Your key supports: " + ", ".join(model_names))
+                    st.info("Key supports: " + ", ".join(model_names))
                 else:
-                    st.error("Could not list models. Check API Key.")
+                    st.error("Check API Key permissions.")
             except Exception as e:
                 st.error(f"Discovery Error: {str(e)}")
 
@@ -66,7 +66,11 @@ with st.sidebar:
     target_job = st.text_area("Target Job Description", height=150)
     uploaded_file = st.file_uploader("Current Resume (PDF or TXT)", type=["pdf", "txt"])
 
-# --- 5. MAIN INTERFACE ---
+# --- 5. BRANDING & INSTRUCTIONS ---
+st.title("💼 Executive Resume Strategist")
+st.markdown("### *Strategic Career Partnership*")
+
+# --- 6. MAIN INTERFACE ---
 col1, col2 = st.columns([1, 1])
 
 with col1:
@@ -86,8 +90,10 @@ with col1:
                 st.markdown(prompt)
 
             try:
-                # --- ATTEMPTING 'gemini-1.5-flash-latest' FOR V1 STABILITY ---
-                url = f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash-latest:generateContent?key={st.session_state.api_key}"
+                # --- UPDATED TO GEMINI 2.0 FLASH ---
+                # We are using the exact path your key confirmed it supports.
+                model_path = "models/gemini-2.0-flash"
+                url = f"https://generativelanguage.googleapis.com/v1/{model_path}:generateContent?key={st.session_state.api_key}"
                 
                 resume_text = ""
                 if uploaded_file:
@@ -99,16 +105,18 @@ with col1:
 
                 history = "\n".join([f"{m['role'].upper()}: {m['content']}" for m in st.session_state.messages])
                 payload = {
-                    "contents": [{"parts": [{"text": f"{st.secrets['SYSTEM_PROMPT']}\n\nJD: {target_job}\nRESUME: {resume_text}\n\nHISTORY:\n{history}\n\nUSER: {prompt}"}]}]
+                    "contents": [{
+                        "parts": [{
+                            "text": f"{st.secrets['SYSTEM_PROMPT']}\n\nJD: {target_job}\nRESUME: {resume_text}\n\nHISTORY:\n{history}\n\nUSER: {prompt}"
+                        }]
+                    }]
                 }
 
                 response = requests.post(url, headers={'Content-Type': 'application/json'}, data=json.dumps(payload))
                 response_data = response.json()
 
                 if response.status_code != 200:
-                    error_msg = response_data.get('error', {}).get('message', 'Unknown API Error')
-                    st.error(f"API Error: {error_msg}")
-                    st.info("Tip: Try clicking 'Check Available Models' in the sidebar to see which name your account requires.")
+                    st.error(f"API Error: {response_data.get('error', {}).get('message', 'Unknown Error')}")
                 else:
                     ai_response = response_data['candidates'][0]['content']['parts'][0]['text']
                     

@@ -28,7 +28,7 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- 4. SIDEBAR: PERSISTENT CONNECTION ---
+# --- 4. SIDEBAR: PERSISTENT CONNECTION & MODEL SELECTOR ---
 with st.sidebar:
     st.header("Step 1: Setup")
     st.markdown("[🔗 Get Gemini API Key](https://aistudio.google.com/app/apikey)")
@@ -42,19 +42,13 @@ with st.sidebar:
     else:
         st.success("✅ Consultant Online")
         
-        # --- PERMANENT HEALTH CHECK ---
-        if st.button("🔍 Check Available Models"):
-            try:
-                list_url = f"https://generativelanguage.googleapis.com/v1/models?key={st.session_state.api_key}"
-                r = requests.get(list_url)
-                models_data = r.json()
-                if "models" in models_data:
-                    model_names = [m['name'] for m in models_data['models'] if 'generateContent' in m['supportedGenerationMethods']]
-                    st.info("Key supports: " + ", ".join(model_names))
-                else:
-                    st.error("Check API Key permissions.")
-            except Exception as e:
-                st.error(f"Discovery Error: {str(e)}")
+        # --- DYNAMIC MODEL SELECTOR ---
+        # Based on your key results, we offer the 2.5 and 2.0 options
+        model_choice = st.selectbox(
+            "Select Model", 
+            ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash"],
+            help="If you get a 'Quota' error, try switching models."
+        )
 
         if st.button("Disconnect / Change Key"):
             st.session_state.api_key = None
@@ -90,11 +84,10 @@ with col1:
                 st.markdown(prompt)
 
             try:
-                # --- UPDATED TO GEMINI 2.0 FLASH ---
-                # We are using the exact path your key confirmed it supports.
-                model_path = "models/gemini-2.0-flash"
-                url = f"https://generativelanguage.googleapis.com/v1/{model_path}:generateContent?key={st.session_state.api_key}"
+                # --- DYNAMIC API URL ---
+                url = f"https://generativelanguage.googleapis.com/v1/models/{model_choice}:generateContent?key={st.session_state.api_key}"
                 
+                # PDF/TXT Extraction
                 resume_text = ""
                 if uploaded_file:
                     if uploaded_file.type == "application/pdf":
@@ -117,6 +110,8 @@ with col1:
 
                 if response.status_code != 200:
                     st.error(f"API Error: {response_data.get('error', {}).get('message', 'Unknown Error')}")
+                    if "quota" in str(response_data).lower():
+                        st.warning(f"⚠️ Quota exceeded for {model_choice}. Please select a different model from the sidebar.")
                 else:
                     ai_response = response_data['candidates'][0]['content']['parts'][0]['text']
                     

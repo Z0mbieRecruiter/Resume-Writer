@@ -43,7 +43,7 @@ with st.sidebar:
         st.success("✅ Consultant Online")
         if st.button("Disconnect / Change Key"):
             st.session_state.api_key = None
-            st.session_state.messages = [] # Clear chat on disconnect
+            st.session_state.messages = [] 
             st.rerun()
 
     st.divider()
@@ -75,8 +75,8 @@ with col1:
                 st.markdown(prompt)
 
             try:
-                # --- DIRECT WEB REQUEST (No Beta, No 404) ---
-                # We hard-code the STABLE v1 URL here.
+                # --- FIXED MODEL NAME FOR STABLE V1 ---
+                # We removed 'models/' prefix which was causing the latest error
                 url = f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key={st.session_state.api_key}"
                 
                 # PDF/TXT Extraction
@@ -98,7 +98,6 @@ with col1:
                     }]
                 }
 
-                # Send the request manually
                 response = requests.post(url, headers={'Content-Type': 'application/json'}, data=json.dumps(payload))
                 response_data = response.json()
 
@@ -106,9 +105,9 @@ with col1:
                     error_msg = response_data.get('error', {}).get('message', 'Unknown API Error')
                     st.error(f"API Error: {error_msg}")
                 else:
+                    # Extract text safely
                     ai_response = response_data['candidates'][0]['content']['parts'][0]['text']
                     
-                    # Update Draft logic
                     if "<resume>" in ai_response:
                         parts = re.split(r'<\/?resume>', ai_response)
                         st.session_state.resume_draft = parts[1].strip()

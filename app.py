@@ -19,14 +19,30 @@ st.markdown("""
 # --- SIDEBAR ---
 with st.sidebar:
     st.header("Step 1: Authorization")
-    api_key = st.text_input("Gemini API Key", type="password", help="Get a free key at aistudio.google.com")
+    
+    # Direct link to the API key page
+    st.markdown("[🔗 Get your FREE Gemini API Key here](https://aistudio.google.com/app/apikey)")
+    
+    api_key = st.text_input(
+        "Paste Gemini API Key", 
+        type="password", 
+        help="Once you click the link above, click 'Create API key' and copy it here."
+    )
+    
+    st.divider()
     
     st.header("Step 2: Context")
     uploaded_file = st.file_uploader("Current Resume (Optional)", type=["pdf", "txt"])
     target_job = st.text_area("Target Job Description", placeholder="Paste job requirements here...")
     
     if st.button("❓ Need Help?"):
-        st.info("Paste your API key, add a Job Description, and say 'Hello' in the chat to begin!")
+        st.info("""
+        **Quick Start:**
+        1. Click the link above to get your key.
+        2. Paste the key in the box.
+        3. Paste the Job Description you are aiming for.
+        4. Type 'Hello' in the chat to start your consultation!
+        """)
 
 # --- INITIALIZE STATE ---
 if "messages" not in st.session_state:

@@ -20,14 +20,27 @@ if "resume_draft" not in st.session_state:
 st.markdown("""
     <style>
     .stChatMessage { border-radius: 10px; margin-bottom: 10px; }
+    
+    /* Ensure the draft box is always readable */
     .resume-box { 
         background-color: #f8f9fa; padding: 25px; border-radius: 15px; 
         border: 1px solid #e9ecef; height: 85vh; overflow-y: auto; 
         color: #212529; font-family: 'serif'; white-space: pre-wrap;
     }
+    
+    /* Explicitly setting dark text for the light-colored instruction card */
     .instruction-card {
-        background-color: #e8f0fe; padding: 15px; border-radius: 10px;
-        border-left: 5px solid #1a73e8; margin-bottom: 20px;
+        background-color: #e8f0fe; 
+        color: #1e3a8a; /* Deep Navy Text */
+        padding: 20px; 
+        border-radius: 10px;
+        border-left: 5px solid #1a73e8; 
+        margin-bottom: 20px;
+    }
+    
+    /* Forcing all text inside the card to be dark */
+    .instruction-card strong, .instruction-card li, .instruction-card em {
+        color: #1e3a8a !important;
     }
     </style>
     """, unsafe_allow_html=True)

@@ -5,30 +5,30 @@ import PyPDF2
 import re
 import io
 
-# --- 1. SYSTEM CONFIG ---
+# --- 1. SYSTEM CONFIGURATION ---
 st.set_page_config(page_title="Executive Resume Strategist", layout="wide")
 
-# --- 2. SESSION STATE MANAGEMENT ---
+# --- 2. SESSION STATE ---
 if "api_key" not in st.session_state:
     st.session_state.api_key = None
 if "messages" not in st.session_state:
     st.session_state.messages = []
 if "resume_draft" not in st.session_state:
-    st.session_state.resume_draft = "# Resume Draft\n*Your progress will appear here...*"
+    st.session_state.resume_draft = "# Executive Resume Draft\n*Consultation pending...*"
 
-# --- 3. PROFESSIONAL STYLING ---
+# --- 3. STYLING ---
 st.markdown("""
     <style>
     .stChatMessage { border-radius: 10px; margin-bottom: 10px; }
     .resume-box { 
         background-color: #f8f9fa; padding: 25px; border-radius: 15px; 
-        border: 1px solid #e9ecef; height: 80vh; overflow-y: auto; 
+        border: 1px solid #e9ecef; height: 85vh; overflow-y: auto; 
         color: #212529; font-family: 'serif'; white-space: pre-wrap;
     }
     </style>
     """, unsafe_allow_html=True)
 
-# --- 4. SIDEBAR: PERSISTENT CONNECTION ---
+# --- 4. SIDEBAR ---
 with st.sidebar:
     st.header("Step 1: Setup")
     if not st.session_state.api_key:
@@ -38,50 +38,44 @@ with st.sidebar:
                 st.session_state.api_key = user_key
                 st.rerun()
     else:
-        st.success("✅ Consultant Online")
-        # We'll default to 2.5 Flash as it's your newest stable option
-        model_choice = st.selectbox(
-            "Select Model", 
-            ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash"]
-        )
-        if st.button("Disconnect / Change Key"):
+        st.success("✅ Strategist Online")
+        model_choice = st.selectbox("Select Model", ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash"])
+        if st.button("Disconnect / Reset"):
             st.session_state.api_key = None
-            st.session_state.messages = [] 
+            st.session_state.messages = []
+            st.session_state.resume_draft = "# Executive Resume Draft..."
             st.rerun()
 
     st.divider()
     st.header("Step 2: Context")
-    target_job = st.text_area("Target Job Description", height=150, placeholder="Paste requirements here...")
+    target_job = st.text_area("Target Job Description", height=200)
     uploaded_file = st.file_uploader("Current Resume (PDF/TXT)", type=["pdf", "txt"])
 
-# --- 5. BRANDING & INSTRUCTIONS ---
+# --- 5. MAIN INTERFACE ---
 st.title("💼 Executive Resume Strategist")
-st.markdown("### *Strategic Career Partnership*")
 
-# --- 6. MAIN INTERFACE ---
-col1, col2 = st.columns([1, 1])
+col1, col2 = st.columns([1, 1.2])
 
 with col1:
-    st.subheader("The Consultation")
+    st.subheader("Consultation")
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
 
-    if prompt := st.chat_input("Talk to the Consultant..."):
+    if prompt := st.chat_input("Talk to the Strategist..."):
         if not st.session_state.api_key:
-            st.error("Please connect your API Key in the sidebar.")
+            st.error("Please connect in the sidebar.")
         elif "SYSTEM_PROMPT" not in st.secrets:
-            st.error("Missing 'SYSTEM_PROMPT' in Secrets.")
+            st.error("SYSTEM_PROMPT not found in Streamlit Secrets.")
         else:
             st.session_state.messages.append({"role": "user", "content": prompt})
             with st.chat_message("user"):
                 st.markdown(prompt)
 
             try:
-                # --- UNIVERSAL V1 ENDPOINT ---
                 url = f"https://generativelanguage.googleapis.com/v1/models/{model_choice}:generateContent?key={st.session_state.api_key}"
                 
-                # PDF/TXT Extraction
+                # Direct PDF/TXT Extraction
                 resume_text = ""
                 if uploaded_file:
                     if uploaded_file.type == "application/pdf":
@@ -90,58 +84,58 @@ with col1:
                     else:
                         resume_text = uploaded_file.getvalue().decode('utf-8')
 
-                # --- THE "INJECTION" FIX ---
-                # We combine the persona, the job, and the resume into one large 'Instruction Block'
-                # This ensures the v1 API accepts the payload without 'Unknown name' errors.
-                full_instruction_set = f"""
-                CRITICAL PERSONA AND RULES:
-                {st.secrets['SYSTEM_PROMPT']}
-                
-                USER CONTEXT:
-                Target Job: {target_job}
-                Current Resume: {resume_text}
-                
-                Remember: You are a consultant. Ask only ONE question. Do not rewrite yet.
-                """
-
-                # Build the chat history for the AI's memory
                 history_log = "\n".join([f"{m['role'].upper()}: {m['content']}" for m in st.session_state.messages])
 
+                # --- THE "PASSTHROUGH" PAYLOAD ---
+                # This ensures YOUR language from secrets is the first and primary instruction.
                 payload = {
                     "contents": [{
                         "parts": [{
-                            "text": f"{full_instruction_set}\n\nCONVERSATION HISTORY:\n{history_log}\n\nLATEST USER INPUT: {prompt}"
+                            "text": f"""
+{st.secrets['SYSTEM_PROMPT']}
+
+---
+CONTEXT DATA:
+Target Job: {target_job}
+Existing Resume: {resume_text}
+Current Draft State: {st.session_state.resume_draft}
+
+---
+CONVERSATION LOG:
+{history_log}
+
+LATEST USER INPUT: {prompt}
+"""
                         }]
                     }]
                 }
 
-                # Image of a JSON payload structure for Google Gemini API
                 
 
                 response = requests.post(url, headers={'Content-Type': 'application/json'}, data=json.dumps(payload))
                 response_data = response.json()
 
-                if response.status_code != 200:
-                    st.error(f"API Error: {response_data.get('error', {}).get('message', 'Unknown Error')}")
-                else:
+                if response.status_code == 200:
                     ai_response = response_data['candidates'][0]['content']['parts'][0]['text']
                     
-                    # Update Draft logic (<resume> tags)
+                    # Handle the draft tags as defined in your prompt
                     if "<resume>" in ai_response:
                         parts = re.split(r'<\/?resume>', ai_response)
                         st.session_state.resume_draft = parts[1].strip()
-                        clean_res = parts[0].strip() + "\n" + (parts[2].strip() if len(parts) > 2 else "")
+                        clean_chat = parts[0].strip() + "\n" + (parts[2].strip() if len(parts) > 2 else "")
                     else:
-                        clean_res = ai_response
+                        clean_chat = ai_response
 
-                    st.session_state.messages.append({"role": "assistant", "content": clean_res})
+                    st.session_state.messages.append({"role": "assistant", "content": clean_chat})
                     with st.chat_message("assistant"):
-                        st.markdown(clean_res)
+                        st.markdown(clean_chat)
                     st.rerun()
+                else:
+                    st.error(f"API Error: {response_data.get('error', {}).get('message')}")
 
             except Exception as e:
                 st.error(f"System Error: {str(e)}")
 
 with col2:
-    st.subheader("Strategic Draft")
+    st.subheader("Strategic Draft Preview")
     st.markdown(f'<div class="resume-box">{st.session_state.resume_draft}</div>', unsafe_allow_html=True)

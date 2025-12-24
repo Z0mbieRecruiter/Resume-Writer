@@ -39,6 +39,7 @@ with st.sidebar:
                 st.rerun()
     else:
         st.success("✅ Consultant Online")
+        # We'll default to 2.5 Flash as it's your newest stable option
         model_choice = st.selectbox(
             "Select Model", 
             ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash"]
@@ -77,7 +78,7 @@ with col1:
                 st.markdown(prompt)
 
             try:
-                # --- REINFORCED STABLE URL ---
+                # --- UNIVERSAL V1 ENDPOINT ---
                 url = f"https://generativelanguage.googleapis.com/v1/models/{model_choice}:generateContent?key={st.session_state.api_key}"
                 
                 # PDF/TXT Extraction
@@ -89,26 +90,33 @@ with col1:
                     else:
                         resume_text = uploaded_file.getvalue().decode('utf-8')
 
-                # Build the conversation history as parts
-                history_parts = []
-                for m in st.session_state.messages:
-                    history_parts.append({"text": f"{m['role'].upper()}: {m['content']}"})
+                # --- THE "INJECTION" FIX ---
+                # We combine the persona, the job, and the resume into one large 'Instruction Block'
+                # This ensures the v1 API accepts the payload without 'Unknown name' errors.
+                full_instruction_set = f"""
+                CRITICAL PERSONA AND RULES:
+                {st.secrets['SYSTEM_PROMPT']}
+                
+                USER CONTEXT:
+                Target Job: {target_job}
+                Current Resume: {resume_text}
+                
+                Remember: You are a consultant. Ask only ONE question. Do not rewrite yet.
+                """
 
-                # --- NEW PAYLOAD STRUCTURE (Bypassing 'Rewriting' Bug) ---
-                # We separate the Persona (System) from the Data (User)
+                # Build the chat history for the AI's memory
+                history_log = "\n".join([f"{m['role'].upper()}: {m['content']}" for m in st.session_state.messages])
+
                 payload = {
-                    "system_instruction": {
-                        "parts": [{"text": st.secrets['SYSTEM_PROMPT']}]
-                    },
                     "contents": [{
-                        "parts": [
-                            {"text": f"TARGET JOB DESCRIPTION: {target_job}"},
-                            {"text": f"USER'S EXISTING RESUME: {resume_text}"},
-                            {"text": f"LATEST USER MESSAGE: {prompt}"},
-                            {"text": "Remember: Be a consultant. Ask one question at a time. Do not just rewrite."}
-                        ]
+                        "parts": [{
+                            "text": f"{full_instruction_set}\n\nCONVERSATION HISTORY:\n{history_log}\n\nLATEST USER INPUT: {prompt}"
+                        }]
                     }]
                 }
+
+                # Image of a JSON payload structure for Google Gemini API
+                
 
                 response = requests.post(url, headers={'Content-Type': 'application/json'}, data=json.dumps(payload))
                 response_data = response.json()

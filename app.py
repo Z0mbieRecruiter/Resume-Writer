@@ -4,11 +4,12 @@ import json
 import PyPDF2
 import re
 import io
+import time # Added for wait logic
 
 # --- 1. SYSTEM CONFIGURATION ---
 st.set_page_config(page_title="Executive Resume Strategist", layout="centered")
 
-# --- 2. SESSION STATE (Memory Management) ---
+# --- 2. SESSION STATE ---
 if "api_key" not in st.session_state:
     st.session_state.api_key = None
 if "messages" not in st.session_state:
@@ -20,31 +21,16 @@ if "resume_draft" not in st.session_state:
 st.markdown("""
     <style>
     .stChatMessage { border-radius: 10px; margin-bottom: 10px; }
-    
     .instruction-card {
-        background-color: #e8f0fe; 
-        color: #1e3a8a; 
-        padding: 20px; 
-        border-radius: 10px;
-        border-left: 5px solid #1a73e8; 
-        margin-bottom: 20px;
+        background-color: #e8f0fe; color: #1e3a8a; padding: 20px; 
+        border-radius: 10px; border-left: 5px solid #1a73e8; margin-bottom: 20px;
     }
-    
-    .instruction-card strong, .instruction-card li, .instruction-card em {
-        color: #1e3a8a !important;
-    }
-
-    /* Styling the Draft Area Header */
-    .draft-header {
-        margin-top: 50px;
-        padding: 10px;
-        border-bottom: 2px solid #1a73e8;
-        color: #1a73e8;
-    }
+    .instruction-card strong, .instruction-card li, .instruction-card em { color: #1e3a8a !important; }
+    .draft-header { margin-top: 50px; padding: 10px; border-bottom: 2px solid #1a73e8; color: #1a73e8; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- 4. SIDEBAR: PERSISTENT CONNECTION & CLEAR CHAT ---
+# --- 4. SIDEBAR ---
 with st.sidebar:
     st.header("Step 1: Setup")
     if not st.session_state.api_key:
@@ -57,19 +43,14 @@ with st.sidebar:
         st.success("✅ Strategist Online")
         model_choice = st.selectbox("Select Model", ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash"])
         
-        # RESTORED: Clear Chat / Reset Logic
         if st.button("🗑️ Clear Consultation"):
             st.session_state.messages = []
             st.session_state.resume_draft = ""
             st.rerun()
 
-        if st.button("🔌 Disconnect Key"):
-            st.session_state.api_key = None
-            st.rerun()
-
     st.divider()
     st.header("Step 2: Core Context")
-    target_job = st.text_area("Target Job Description", height=200, placeholder="Paste requirements here...")
+    target_job = st.text_area("Target Job Description", height=200)
     uploaded_file = st.file_uploader("Current Resume (PDF/TXT)", type=["pdf", "txt"])
 
 # --- 5. MAIN INTERFACE ---
@@ -77,13 +58,8 @@ st.title("💼 Executive Resume Strategist")
 
 st.markdown("""
     <div class="instruction-card">
-        <strong>How to use this Strategist:</strong>
-        <ol>
-            <li><strong>Connect:</strong> Enter your API Key in the sidebar.</li>
-            <li><strong>Context:</strong> Paste the Target Job and upload your current Resume.</li>
-            <li><strong>Consult:</strong> Type <strong>"Hello"</strong> to start.</li>
-        </ol>
-        <em>Copy your final draft from the box at the bottom of the page.</em>
+        <strong>Status:</strong> Ready for consultation. <br>
+        <em>If you see a 'Quota' error, wait 30 seconds and try again. This usually means the per-minute limit was hit, not your total daily limit.</em>
     </div>
     """, unsafe_allow_html=True)
 
@@ -117,25 +93,10 @@ if prompt := st.chat_input("Talk to the Strategist..."):
 
             history_log = "\n".join([f"{m['role'].upper()}: {m['content']}" for m in st.session_state.messages])
 
-            # --- VERBATIM PASSTHROUGH PAYLOAD ---
             payload = {
                 "contents": [{
                     "parts": [{
-                        "text": f"""
-{st.secrets['SYSTEM_PROMPT']}
-
----
-CONTEXT DATA:
-Target Job: {target_job}
-Existing Resume: {resume_text}
-Current Draft State: {st.session_state.resume_draft}
-
----
-CONVERSATION LOG:
-{history_log}
-
-LATEST USER INPUT: {prompt}
-"""
+                        "text": f"{st.secrets['SYSTEM_PROMPT']}\n\nCONTEXT:\nJob: {target_job}\nResume: {resume_text}\nDraft: {st.session_state.resume_draft}\n\nHISTORY:\n{history_log}\n\nUSER: {prompt}"
                     }]
                 }]
             }
@@ -143,10 +104,17 @@ LATEST USER INPUT: {prompt}
             response = requests.post(url, headers={'Content-Type': 'application/json'}, data=json.dumps(payload))
             response_data = response.json()
 
+            # --- SMART QUOTA HANDLING ---
+            if response.status_code == 429:
+                st.warning("⚠️ Rate Limit Hit (Too many requests per minute). Retrying in 5 seconds...")
+                time.sleep(5)
+                # Second Attempt
+                response = requests.post(url, headers={'Content-Type': 'application/json'}, data=json.dumps(payload))
+                response_data = response.json()
+
             if response.status_code == 200:
                 ai_response = response_data['candidates'][0]['content']['parts'][0]['text']
                 
-                # Update logic to isolate resume tags
                 if "<resume>" in ai_response:
                     parts = re.split(r'<\/?resume>', ai_response)
                     st.session_state.resume_draft = parts[1].strip()
@@ -157,14 +125,12 @@ LATEST USER INPUT: {prompt}
                 st.session_state.messages.append({"role": "assistant", "content": clean_chat})
                 st.rerun()
             else:
-                st.error(f"API Error: {response_data.get('error', {}).get('message')}")
+                st.error(f"API Error ({response.status_code}): {response_data.get('error', {}).get('message')}")
 
         except Exception as e:
             st.error(f"System Error: {str(e)}")
 
-# --- 6. DEDICATED COPY-READY DRAFT AREA ---
+# --- 6. DRAFT AREA ---
 if st.session_state.resume_draft:
     st.markdown('<h3 class="draft-header">📄 Strategic Resume Draft</h3>', unsafe_allow_html=True)
-    st.info("The box below contains ONLY your resume content. Use the button in the top-right of the box to copy.")
-    # st.code provides a built-in 'Copy' button
     st.code(st.session_state.resume_draft, language=None)

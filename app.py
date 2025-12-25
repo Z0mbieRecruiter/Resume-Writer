@@ -4,7 +4,7 @@ import json
 import PyPDF2
 import re
 import io
-import time # Added for wait logic
+import time
 
 # --- 1. SYSTEM CONFIGURATION ---
 st.set_page_config(page_title="Executive Resume Strategist", layout="centered")
@@ -58,8 +58,8 @@ st.title("💼 Executive Resume Strategist")
 
 st.markdown("""
     <div class="instruction-card">
-        <strong>Status:</strong> Ready for consultation. <br>
-        <em>If you see a 'Quota' error, wait 30 seconds and try again. This usually means the per-minute limit was hit, not your total daily limit.</em>
+        <strong>Status:</strong> Strategist is ready. <br>
+        <em>The 'Persona Anchor' is active to ensure consultative partnership.</em>
     </div>
     """, unsafe_allow_html=True)
 
@@ -93,24 +93,36 @@ if prompt := st.chat_input("Talk to the Strategist..."):
 
             history_log = "\n".join([f"{m['role'].upper()}: {m['content']}" for m in st.session_state.messages])
 
+            # --- THE PERSONA ANCHOR PAYLOAD ---
+            # We place your instructions at the START and END of the data block.
             payload = {
                 "contents": [{
                     "parts": [{
-                        "text": f"{st.secrets['SYSTEM_PROMPT']}\n\nCONTEXT:\nJob: {target_job}\nResume: {resume_text}\nDraft: {st.session_state.resume_draft}\n\nHISTORY:\n{history_log}\n\nUSER: {prompt}"
+                        "text": f"""
+                        ACT AS THE FOLLOWING PERSONA:
+                        {st.secrets['SYSTEM_PROMPT']}
+
+                        ---
+                        RAW DATA FOR ANALYSIS:
+                        TARGET JOB: {target_job}
+                        USER RESUME: {resume_text}
+                        CURRENT DRAFT: {st.session_state.resume_draft}
+                        ---
+
+                        CONVERSATION HISTORY:
+                        {history_log}
+
+                        REMINDER OF YOUR ROLE AND RULES:
+                        {st.secrets['SYSTEM_PROMPT']}
+
+                        LATEST USER INPUT: {prompt}
+                        """
                     }]
                 }]
             }
 
             response = requests.post(url, headers={'Content-Type': 'application/json'}, data=json.dumps(payload))
             response_data = response.json()
-
-            # --- SMART QUOTA HANDLING ---
-            if response.status_code == 429:
-                st.warning("⚠️ Rate Limit Hit (Too many requests per minute). Retrying in 5 seconds...")
-                time.sleep(5)
-                # Second Attempt
-                response = requests.post(url, headers={'Content-Type': 'application/json'}, data=json.dumps(payload))
-                response_data = response.json()
 
             if response.status_code == 200:
                 ai_response = response_data['candidates'][0]['content']['parts'][0]['text']
